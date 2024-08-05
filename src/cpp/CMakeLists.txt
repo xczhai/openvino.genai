@@ -48,7 +48,7 @@ add_library(openvino::genai ALIAS ${TARGET_NAME})
 target_include_directories(${TARGET_NAME}
     PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>" "$<INSTALL_INTERFACE:runtime/include>")
 
-target_link_libraries(${TARGET_NAME} PUBLIC openvino::runtime PRIVATE nlohmann_json::nlohmann_json jinja2cpp)
+target_link_libraries(${TARGET_NAME} PUBLIC openvino::runtime numa PRIVATE nlohmann_json::nlohmann_json jinja2cpp)
 
 target_compile_features(${TARGET_NAME} PUBLIC cxx_std_17)
 

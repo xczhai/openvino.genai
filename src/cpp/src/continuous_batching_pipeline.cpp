@@ -88,6 +88,11 @@ public:
 
         apply_paged_attention_transformations(model, device_config);
 
+        std::cout << "[debug] inputs: ";
+        for (auto i : model->inputs()) {
+            std::cout << i.get_any_name() << ": " << i.get_partial_shape().to_string() << "\n";
+        }
+
         ov::InferRequest infer_request = core.compile_model(model, device_config.get_device(), plugin_config).create_infer_request();
 
         // setup KV caches

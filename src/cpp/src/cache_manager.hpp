@@ -4,6 +4,10 @@
 
 #include <vector>
 #include <list>
+#include <iostream>
+#include <sys/syscall.h>
+#include <unistd.h>
+#include <numaif.h>
 
 #include "openvino/runtime/tensor.hpp"
 
@@ -30,9 +34,64 @@ public:
             std::memset(key_cache.data(), 0, key_cache.get_byte_size());
             std::memset(value_cache.data(), 0, value_cache.get_byte_size());
 
+            // force numa aware
+            if (std::getenv("KV_NUMA")) {
+                // std::cout << "[DEBUG] start KV cache numa realloc ...\n";
+                numa_aware_alloc(key_cache);
+                numa_aware_alloc(value_cache);
+            }
+
             m_key_cache.emplace_back(key_cache);
             m_value_cache.emplace_back(value_cache);
         }
+    }
+
+    bool mem_bind_move(void* data, size_t size, int targetNode, int pagesize, int page_count) {
+        // int realNode = ov::get_org_numa_id(targetNode);
+        int realNode = targetNode;
+        // auto pagesize = getpagesize();
+        // auto page_count = (size + pagesize - 1) / pagesize;
+        char* pages = reinterpret_cast<char*>((((uintptr_t)data) & ~((uintptr_t)(pagesize - 1))));
+        unsigned long mask = 0;
+        unsigned flags = 0;
+        if (realNode < 0) {
+            // restore default policy
+            mask = -1;
+            flags = 0;
+        } else {
+            mask = 1ul << realNode;
+            flags = MPOL_MF_MOVE | MPOL_MF_STRICT;
+        }
+
+        auto rc = mbind(pages, page_count * pagesize, MPOL_BIND, &mask, sizeof(mask) * 8, flags);
+        if (rc < 0) {
+            std::cout << "mbind failed: " << strerror(errno) << "\n";
+            return false;
+        }
+        return true;
+    }
+
+    void numa_aware_alloc(ov::Tensor& cache, int axis = -1) {
+        auto data_type = cache.get_element_type();
+        auto data_shap = cache.get_shape().to_string();
+        auto data_size = cache.get_size();
+        auto data_mems = cache.get_byte_size();
+        // std::cout << "[debug] tensor type: " << data_type
+        //     << ", shape: " << data_shap
+        //     << ", size: " << data_size 
+        //     << ", data_mems: " << data_mems << "\n";
+        // page
+        const size_t page_size = getpagesize();
+        auto page_nums = (data_mems + page_size - 1) / page_size;
+        // std::cout << "[debug] page size: " << page_size << ", page nums: " << page_nums << "\n";
+        // dim TODO@alan
+        const int head_dim = axis; // should be 1
+        auto page_offset = page_nums / 2;
+        auto data_ptr = cache.data(data_type);
+        // move to node 0
+        mem_bind_move(data_ptr, 0, 0, page_size, page_offset);
+        // move to node 1
+        mem_bind_move(data_ptr, 0, 1, page_size, page_offset);
     }
 
     ov::Tensor get_key_cache(size_t decoder_layer_id) const {
